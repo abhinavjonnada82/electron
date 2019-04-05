@@ -231,7 +231,8 @@ HRESULT DeleteFileProgressSink::ResumeTimer() {
 }
 
 void OpenExternalOnWorkerThread(const GURL& url,
-                                const OpenExternalOptions& options) {
+                                const OpenExternalOptions& options,
+                                OpenExternalCallback callback) {
   base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   // Quote the input scheme to be sure that the command does not have
   // parameters unexpected by the external program. This url should already
@@ -243,10 +244,9 @@ void OpenExternalOnWorkerThread(const GURL& url,
           ShellExecuteW(nullptr, "open", escaped_url.c_str(), nullptr,
                         working_dir.empty() ? nullptr : working_dir.c_str(),
                         SW_SHOWNORMAL)) <= 32) {
-    // On failure, it may be good to display a message to the user.
-    // https://crbug.com/727913
-    return;
+    std::move(callback).Run("Failed to open");
   }
+  std::move(callback).Run("");
 }
 
 void ShowItemInFolderOnWorkerThread(const base::FilePath& full_path) {
@@ -323,13 +323,11 @@ bool OpenItem(const base::FilePath& full_path) {
 void OpenExternal(const GURL& url,
                   const OpenExternalOptions& options,
                   OpenExternalCallback callback) {
-  // TODO(gabriel): Implement async open if callback is specified
-  std::move(callback).Run(
-      base::CreateCOMSTATaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::USER_BLOCKING})
-          ->PostTask(FROM_HERE,
-                     base::BindOnce(&OpenExternalOnWorkerThread, url, options));
-      ? "" : "Failed to open");
+  base::CreateCOMSTATaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_BLOCKING})
+      ->PostTaskReplyWithResult(
+          FROM_HERE, base::BindOnce(&OpenExternalOnWorkerThread, url, options,
+                                    std::move(callback)));
 }
 
 bool MoveItemToTrash(const base::FilePath& path) {
